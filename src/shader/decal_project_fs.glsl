@@ -42,16 +42,16 @@ bool is_outside_decal_bounds(vec3 uv)
 void main(void)
 {
     vec4 decal_space_pos = light_view_proj * vec4(FS_IN_WorldPos, 1.0);
-    vec3 decal_uv = decal_space_pos.xyz * 0.5 + 0.5;
+    vec3 decal_uv        = decal_space_pos.xyz * 0.5 + 0.5;
 
     if (is_outside_decal_bounds(decal_uv))
         discard;
 
     float compare_depth = texture(s_Depth, decal_uv.xy).r;
-    
+
     if ((decal_uv.z - BIAS) > compare_depth)
         discard;
-    
+
     FS_OUT_Color = texture(s_Decal, decal_uv.xy);
 }
 

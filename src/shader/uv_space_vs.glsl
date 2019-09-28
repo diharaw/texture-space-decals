@@ -38,7 +38,7 @@ void main()
 
     vec2 clip_space_pos = 2.0 * VS_IN_TexCoord - 1.0;
 
-    gl_Position    = vec4(clip_space_pos, 0.0, 1.0);
+    gl_Position = vec4(clip_space_pos, 0.0, 1.0);
 }
 
 // ------------------------------------------------------------------

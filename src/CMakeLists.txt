@@ -24,10 +24,11 @@ target_link_libraries(TextureSpaceDecals embree)
 if (NOT APPLE)
     add_custom_command(TARGET TextureSpaceDecals POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/src/shader $<TARGET_FILE_DIR:TextureSpaceDecals>/shader)
     add_custom_command(TARGET TextureSpaceDecals POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data/mesh $<TARGET_FILE_DIR:TextureSpaceDecals>/mesh)
+    add_custom_command(TARGET TextureSpaceDecals POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data/texture $<TARGET_FILE_DIR:TextureSpaceDecals>/texture)
 endif()
 
 if(CLANG_FORMAT_EXE)
-    add_custom_target(TextureSpaceDecals-clang-format COMMAND ${CLANG_FORMAT_EXE} -i -style=file ${RSM_SOURCES} ${SHADER_SOURCES})
+    add_custom_target(TextureSpaceDecals-clang-format COMMAND ${CLANG_FORMAT_EXE} -i -style=file ${TSD_SOURCES} ${SHADER_SOURCES})
 endif()
 
 set_property(TARGET TextureSpaceDecals PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/$(Configuration)")

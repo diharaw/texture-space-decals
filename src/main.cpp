@@ -8,6 +8,7 @@
 #include <stack>
 #include <random>
 #include <chrono>
+#include <random>
 #include <rtccore.h>
 #include <rtcore_geometry.h>
 #include <rtcore_common.h>
@@ -17,7 +18,7 @@
 
 #define CAMERA_FAR_PLANE 1000.0f
 #define PROJECTOR_BACK_OFF_DISTANCE 10.0f;
-#define ALBEDO_TEXTURE_SIZE 2048
+#define ALBEDO_TEXTURE_SIZE 4096
 #define DEPTH_TEXTURE_SIZE 512
 
 struct GlobalUniforms
@@ -61,7 +62,7 @@ protected:
 
         m_transform = glm::mat4(1.0f);
 
-		init_texture();
+        init_texture();
 
         return true;
     }
@@ -78,12 +79,13 @@ protected:
         if (m_debug_gui)
             ui();
 
-		if (m_requires_update)
-		{
-			m_requires_update = false;
-			render_depth_map();
-			apply_decals();
-		}
+        if (m_requires_update)
+        {
+            m_requires_update = false;
+            render_depth_map();
+            apply_decals();
+            m_albedo_texture->generate_mipmaps();
+        }
 
         render_lit_scene();
 
@@ -206,7 +208,20 @@ protected:
                 m_projector_pos = m_hit_pos + m_hit_normal * PROJECTOR_BACK_OFF_DISTANCE;
                 m_projector_dir = -m_hit_normal;
 
-				m_requires_update = true;
+                m_requires_update = true;
+
+                if (m_randomize_decals)
+                {
+                    std::random_device                    rd;
+                    std::mt19937                          gen(rd());
+                    std::uniform_real_distribution<float> scale_dis(5.0, 20.0);
+                    std::uniform_real_distribution<float> rotation_dis(-90.0, 90.0);
+                    std::uniform_int_distribution<>       index_dis(0, 3);
+
+                    m_selected_decal     = index_dis(gen);
+                    m_projector_size     = scale_dis(gen);
+                    m_projector_rotation = rotation_dis(gen);
+                }
             }
             else
                 rayhit.ray.tfar = INFINITY;
@@ -253,30 +268,33 @@ private:
 
     void init_texture()
     {
-        if (GLAD_GL_NV_conservative_raster)
-            glEnable(GL_CONSERVATIVE_RASTERIZATION_NV);
-        else if (GLAD_GL_INTEL_conservative_rasterization)
-            glEnable(GL_INTEL_conservative_rasterization);
+        if (m_enable_conservative_raster)
+        {
+            if (GLAD_GL_NV_conservative_raster)
+                glEnable(GL_CONSERVATIVE_RASTERIZATION_NV);
+            else if (GLAD_GL_INTEL_conservative_rasterization)
+                glEnable(GL_INTEL_conservative_rasterization);
+        }
 
-		glDisable(GL_DEPTH_TEST);
+        glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
 
         glDisable(GL_CULL_FACE);
- 
+
         m_albedo_fbo->bind();
 
         glViewport(0, 0, ALBEDO_TEXTURE_SIZE, ALBEDO_TEXTURE_SIZE);
 
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-   
+
         // Bind shader program.
         m_texture_init_program->use();
 
         // Bind uniform buffers.
         m_global_ubo->bind_base(0);
 
-		m_texture_init_program->set_uniform("u_Model", m_transform);
+        m_texture_init_program->set_uniform("u_Model", m_transform);
 
         // Bind vertex array.
         m_mesh->mesh_vertex_array()->bind();
@@ -291,24 +309,32 @@ private:
             glDrawElementsBaseVertex(GL_TRIANGLES, submesh.index_count, GL_UNSIGNED_INT, (void*)(sizeof(unsigned int) * submesh.base_index), submesh.base_vertex);
         }
 
-        if (GLAD_GL_NV_conservative_raster)
-            glDisable(GL_CONSERVATIVE_RASTERIZATION_NV);
-        else if (GLAD_GL_INTEL_conservative_rasterization)
-            glDisable(GL_INTEL_conservative_rasterization);
+        if (m_enable_conservative_raster)
+        {
+            if (GLAD_GL_NV_conservative_raster)
+                glDisable(GL_CONSERVATIVE_RASTERIZATION_NV);
+            else if (GLAD_GL_INTEL_conservative_rasterization)
+                glDisable(GL_INTEL_conservative_rasterization);
+        }
+
+        m_albedo_texture->generate_mipmaps();
     }
 
     // -----------------------------------------------------------------------------------------------------------------------------------
 
     void apply_decals()
     {
-        if (GLAD_GL_NV_conservative_raster)
-            glEnable(GL_CONSERVATIVE_RASTERIZATION_NV);
-        else if (GLAD_GL_INTEL_conservative_rasterization)
-            glEnable(GL_INTEL_conservative_rasterization);
+        if (m_enable_conservative_raster)
+        {
+            if (GLAD_GL_NV_conservative_raster)
+                glEnable(GL_CONSERVATIVE_RASTERIZATION_NV);
+            else if (GLAD_GL_INTEL_conservative_rasterization)
+                glEnable(GL_INTEL_conservative_rasterization);
+        }
 
         glDisable(GL_DEPTH_TEST);
         glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         glDisable(GL_CULL_FACE);
 
@@ -333,30 +359,33 @@ private:
         {
             dw::SubMesh& submesh = submeshes[i];
 
-			if (m_decal_program->set_uniform("s_Decal", 0))
-				m_decal_texture->bind(0);
-            
-			if (m_decal_program->set_uniform("s_Depth", 1))
-				m_depth_texture->bind(1);
+            if (m_decal_program->set_uniform("s_Decal", 0))
+                m_decal_textures[m_selected_decal]->bind(0);
+
+            if (m_decal_program->set_uniform("s_Depth", 1))
+                m_depth_texture->bind(1);
 
             // Issue draw call.
             glDrawElementsBaseVertex(GL_TRIANGLES, submesh.index_count, GL_UNSIGNED_INT, (void*)(sizeof(unsigned int) * submesh.base_index), submesh.base_vertex);
         }
 
-		glDisable(GL_BLEND);
+        glDisable(GL_BLEND);
 
-        if (GLAD_GL_NV_conservative_raster)
-            glDisable(GL_CONSERVATIVE_RASTERIZATION_NV);
-        else if (GLAD_GL_INTEL_conservative_rasterization)
-            glDisable(GL_INTEL_conservative_rasterization);
+        if (m_enable_conservative_raster)
+        {
+            if (GLAD_GL_NV_conservative_raster)
+                glDisable(GL_CONSERVATIVE_RASTERIZATION_NV);
+            else if (GLAD_GL_INTEL_conservative_rasterization)
+                glDisable(GL_INTEL_conservative_rasterization);
+        }
     }
 
     // -----------------------------------------------------------------------------------------------------------------------------------
 
-	void render_depth_map()
-	{
-		render_scene(m_depth_fbo.get(), m_depth_program, 0, 0, DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, GL_BACK);
-	}
+    void render_depth_map()
+    {
+        render_scene(m_depth_fbo.get(), m_depth_program, 0, 0, DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, GL_BACK);
+    }
 
     // -----------------------------------------------------------------------------------------------------------------------------------
 
@@ -398,8 +427,8 @@ private:
             m_mesh_fs          = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_FRAGMENT_SHADER, "shader/mesh_fs.glsl"));
             m_triangle_vs      = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_VERTEX_SHADER, "shader/fullscreen_triangle_vs.glsl"));
             m_visualize_fs     = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_FRAGMENT_SHADER, "shader/visualize_albedo_fs.glsl"));
-            m_depth_vs      = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_VERTEX_SHADER, "shader/depth_vs.glsl"));
-            m_depth_fs     = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_FRAGMENT_SHADER, "shader/depth_fs.glsl"));
+            m_depth_vs         = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_VERTEX_SHADER, "shader/depth_vs.glsl"));
+            m_depth_fs         = std::unique_ptr<dw::Shader>(dw::Shader::create_from_file(GL_FRAGMENT_SHADER, "shader/depth_fs.glsl"));
 
             {
                 if (!m_uv_space_vs || !m_decal_project_fs)
@@ -441,7 +470,7 @@ private:
                 m_texture_init_program->uniform_block_binding("GlobalUniforms", 0);
             }
 
-			{
+            {
                 if (!m_depth_vs || !m_depth_fs)
                 {
                     DW_LOG_FATAL("Failed to create Shaders");
@@ -449,8 +478,8 @@ private:
                 }
 
                 // Create general shader program
-                dw::Shader* shaders[]  = { m_depth_vs.get(), m_depth_fs.get() };
-                m_depth_program = std::make_unique<dw::Program>(2, shaders);
+                dw::Shader* shaders[] = { m_depth_vs.get(), m_depth_fs.get() };
+                m_depth_program       = std::make_unique<dw::Program>(2, shaders);
 
                 if (!m_texture_init_program)
                 {
@@ -512,17 +541,19 @@ private:
         m_albedo_texture = std::make_unique<dw::Texture2D>(ALBEDO_TEXTURE_SIZE, ALBEDO_TEXTURE_SIZE, 1, 1, 1, GL_RGB8, GL_RGB, GL_UNSIGNED_BYTE);
 
         m_albedo_texture->set_wrapping(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
+        m_albedo_texture->set_min_filter(GL_LINEAR_MIPMAP_LINEAR);
+        m_albedo_texture->set_mag_filter(GL_LINEAR);
 
         m_albedo_fbo = std::make_unique<dw::Framebuffer>();
 
         m_albedo_fbo->attach_render_target(0, m_albedo_texture.get(), 0, 0);
 
-		m_depth_texture = std::make_unique<dw::Texture2D>(DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, 1, 1, 1, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_HALF_FLOAT);
-		  
+        m_depth_texture = std::make_unique<dw::Texture2D>(DEPTH_TEXTURE_SIZE, DEPTH_TEXTURE_SIZE, 1, 1, 1, GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_HALF_FLOAT);
+
         m_depth_texture->set_wrapping(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
-		  
+
         m_depth_fbo = std::make_unique<dw::Framebuffer>();
-		  
+
         m_depth_fbo->attach_depth_stencil_target(m_depth_texture.get(), 0, 0);
     }
 
@@ -540,11 +571,29 @@ private:
 
     void ui()
     {
-        ImGui::DragFloat("Decal Rotation", &m_projector_rotation, 1.0f, -180.0f, 180.0f);
-        ImGui::DragFloat("Decal Size", &m_projector_size, 1.0f, 0.1f, 20.0f);
+        if (!m_randomize_decals)
+        {
+            ImGui::DragFloat("Decal Rotation", &m_projector_rotation, 1.0f, -180.0f, 180.0f);
+            ImGui::DragFloat("Decal Size", &m_projector_size, 1.0f, 0.1f, 20.0f);
+
+            const char* listbox_items[] = { "OpenGL", "Vulkan", "DirectX", "Metal" };
+            ImGui::ListBox("Selected Decal", &m_selected_decal, listbox_items, IM_ARRAYSIZE(listbox_items), 4);
+        }
+
+        ImGui::Checkbox("Randomize Decals", &m_randomize_decals);
         ImGui::Checkbox("Visualize Projector Frustum", &m_visualize_projection_frustum);
         ImGui::Checkbox("Visualize Hit Point", &m_visualize_hit_point);
         ImGui::Checkbox("Visualize Albedo Map", &m_visualize_albedo_map);
+        ImGui::Checkbox("Conservative Rasterization", &m_enable_conservative_raster);
+
+        if (ImGui::Button("Clear Texture"))
+            init_texture();
+
+        if (!GLAD_GL_NV_conservative_raster && !GLAD_GL_INTEL_conservative_rasterization)
+        {
+            ImGui::Separator();
+            ImGui::Text("Note: Conservative Rasterization not supported on this GPU.");
+        }
     }
 
     // -----------------------------------------------------------------------------------------------------------------------------------
@@ -566,7 +615,23 @@ private:
 
     bool load_decals()
     {
-        m_decal_texture = std::unique_ptr<dw::Texture2D>(dw::Texture2D::create_from_files("texture/Opengl-logo.png", true));
+        m_decal_textures.resize(4);
+        m_decal_textures[0] = std::unique_ptr<dw::Texture2D>(dw::Texture2D::create_from_files("texture/opengl.png", true));
+        m_decal_textures[0]->set_min_filter(GL_LINEAR_MIPMAP_LINEAR);
+        m_decal_textures[0]->set_mag_filter(GL_LINEAR);
+
+        m_decal_textures[1] = std::unique_ptr<dw::Texture2D>(dw::Texture2D::create_from_files("texture/vulkan.png", true));
+        m_decal_textures[1]->set_min_filter(GL_LINEAR_MIPMAP_LINEAR);
+        m_decal_textures[1]->set_mag_filter(GL_LINEAR);
+
+        m_decal_textures[2] = std::unique_ptr<dw::Texture2D>(dw::Texture2D::create_from_files("texture/directx.png", true));
+        m_decal_textures[2]->set_min_filter(GL_LINEAR_MIPMAP_LINEAR);
+        m_decal_textures[2]->set_mag_filter(GL_LINEAR);
+
+        m_decal_textures[3] = std::unique_ptr<dw::Texture2D>(dw::Texture2D::create_from_files("texture/metal.png", true));
+        m_decal_textures[3]->set_min_filter(GL_LINEAR_MIPMAP_LINEAR);
+        m_decal_textures[3]->set_mag_filter(GL_LINEAR);
+
         return true;
     }
 
@@ -673,12 +738,12 @@ private:
 
         glViewport(x, y, w, h);
 
-		if (clear)
-		{
-			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-			glClearDepth(1.0);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		}
+        if (clear)
+        {
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClearDepth(1.0);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
 
         // Bind shader program.
         program->use();
@@ -713,7 +778,7 @@ private:
 
         glm::vec4 rotated_axis = rotate * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
 
-		float ratio = float(m_decal_texture->height()) / float(m_decal_texture->width());
+        float ratio                = float(m_decal_textures[m_selected_decal]->height()) / float(m_decal_textures[m_selected_decal]->width());
         float proportionate_height = m_projector_size * ratio;
 
         m_projector_view = glm::lookAt(m_projector_pos, m_hit_pos, glm::vec3(rotated_axis));
@@ -776,12 +841,12 @@ private:
     std::unique_ptr<dw::Program> m_visualize_program;
     std::unique_ptr<dw::Program> m_depth_program;
 
-    std::unique_ptr<dw::Texture2D> m_albedo_texture;
-    std::unique_ptr<dw::Texture2D> m_decal_texture;
-    std::unique_ptr<dw::Texture2D> m_depth_texture;
+    std::unique_ptr<dw::Texture2D>              m_albedo_texture;
+    std::vector<std::unique_ptr<dw::Texture2D>> m_decal_textures;
+    std::unique_ptr<dw::Texture2D>              m_depth_texture;
 
     std::unique_ptr<dw::Framebuffer> m_albedo_fbo;
-    std::unique_ptr<dw::Framebuffer>   m_depth_fbo;
+    std::unique_ptr<dw::Framebuffer> m_depth_fbo;
 
     std::unique_ptr<dw::UniformBuffer> m_global_ubo;
 
@@ -824,9 +889,12 @@ private:
     bool      m_requires_update    = false;
 
     // Debug
-    bool m_visualize_albedo_map         = true;
-    bool m_visualize_projection_frustum = false;
-    bool m_visualize_hit_point          = false;
+    bool    m_visualize_albedo_map         = true;
+    bool    m_visualize_projection_frustum = false;
+    bool    m_visualize_hit_point          = false;
+    bool    m_enable_conservative_raster   = true;
+    bool    m_randomize_decals             = true;
+    int32_t m_selected_decal               = 0;
 
     // Camera orientation.
     float m_camera_x;
