@@ -54,7 +54,7 @@ void main(void)
     // Sample the depth from our depth texture.
     float compare_depth = texture(s_Depth, decal_uv.xy).r;
 
-    // Compare the depth the current fragment to the depth of from the depth texture (closest point from the decal projector).
+    // Compare the depth the current fragment to the depth from the depth texture (closest point from the decal projector).
     // If it's greater, the current fragment is NOT visible to the projector and should be discarded.
     if ((decal_uv.z - BIAS) > compare_depth)
         discard;
