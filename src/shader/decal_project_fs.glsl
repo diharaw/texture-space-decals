@@ -41,17 +41,25 @@ bool is_outside_decal_bounds(vec3 uv)
 
 void main(void)
 {
-    vec4 decal_space_pos = light_view_proj * vec4(FS_IN_WorldPos, 1.0);
+    // We project the world space position into the Decals coordinate space
+    vec4 decal_space_pos = decal_view_proj * vec4(FS_IN_WorldPos, 1.0);
+
+    // Rescale the values to between [0.0 - 1.0]
     vec3 decal_uv        = decal_space_pos.xyz * 0.5 + 0.5;
 
+    // Check if these coordinates are outside of UV bounds
     if (is_outside_decal_bounds(decal_uv))
         discard;
 
+    // Sample the depth from our depth texture.
     float compare_depth = texture(s_Depth, decal_uv.xy).r;
 
+    // Compare the depth the current fragment to the depth of from the depth texture (closest point from the decal projector).
+    // If it's greater, the current fragment is NOT visible to the projector and should be discarded.
     if ((decal_uv.z - BIAS) > compare_depth)
         discard;
 
+    // Sample the decal texture using the Decal UVs.
     FS_OUT_Color = texture(s_Decal, decal_uv.xy);
 }
 
