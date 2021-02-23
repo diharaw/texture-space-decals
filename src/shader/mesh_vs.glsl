@@ -23,7 +23,7 @@ out vec2 FS_IN_TexCoord;
 layout(std140) uniform GlobalUniforms
 {
     mat4 view_proj;
-    mat4 light_view_proj;
+    mat4 decal_view_proj;
     vec4 cam_pos;
 };
 
